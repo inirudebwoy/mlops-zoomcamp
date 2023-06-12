@@ -1,3 +1,4 @@
+import email
 import pathlib
 import pickle
 import pandas as pd
@@ -9,9 +10,11 @@ from sklearn.metrics import mean_squared_error
 import mlflow
 import xgboost as xgb
 from prefect import flow, task
+from prefect.artifacts import create_markdown_artifact
+from prefect_email import EmailServerCredentials, email_send_message
 
 
-@task(retries=3, retry_delay_seconds=2)
+@task(retries=3, retry_delay_seconds=2, name="Read taxi data")
 def read_data(filename: str) -> pd.DataFrame:
     """Read data into DataFrame"""
     df = pd.read_parquet(filename)
@@ -100,12 +103,22 @@ def train_best_model(
         rmse = mean_squared_error(y_val, y_pred, squared=False)
         mlflow.log_metric("rmse", rmse)
 
+        create_markdown_artifact(
+            key="rmse",
+            markdown=f"""
+            # NYC Taxi duration prediction RMSE
+            {rmse:.2f}
+            """,
+            description="RMSE on validation dataset",
+        )
+
         pathlib.Path("models").mkdir(exist_ok=True)
         with open("models/preprocessor.b", "wb") as f_out:
             pickle.dump(dv, f_out)
         mlflow.log_artifact("models/preprocessor.b", artifact_path="preprocessor")
 
         mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
+
     return None
 
 
@@ -129,7 +142,19 @@ def main_flow(
 
     # Train
     train_best_model(X_train, X_val, y_train, y_val, dv)
+    email_credentials_block = EmailServerCredentials.load("email-server-creds")
+    email_send_message(
+        email_server_credentials=email_credentials_block,
+        subject="Training finished",
+        msg="Training finished",
+        email_to="michal@klichx.dev",
+    )
 
 
 if __name__ == "__main__":
     main_flow()
+
+# Q3. answer is 5.19931
+# 04. answer is 5.37
+# Q5. answer is email_send_message
+# Q6. answer is Actions
